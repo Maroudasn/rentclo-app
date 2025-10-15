@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { getItemDetail } from '../utils/api';
+import { getItemDetail, createBooking } from '../utils/api';
 import { getItemImages, handleImageError } from '../utils/imageHelpers';
 import './Booking.css';
 
@@ -96,16 +96,27 @@ const Booking = () => {
     setSubmitting(true);
     
     try {
-      // Simulate booking API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Create booking using real API
+      const bookingData = {
+        item_id: parseInt(itemId),
+        start_date: bookingDate,
+        end_date: endDate,
+        notes: `Booking for ${days} day(s)`
+      };
       
-      alert(`Booking confirmed! You have rented "${item.title}" for ${days} day(s) starting from ${bookingDate}. Total cost: €${calculateTotalPrice()}`);
+      const result = await createBooking(bookingData);
+      
+      alert(`Booking confirmed! You have rented "${item.title}" for ${days} day(s) starting from ${bookingDate}. Total cost: €${calculateTotalPrice()}. Booking ID: ${result.id}`);
       
       // Navigate back to item details or to a confirmation page
       navigate(`/item/${itemId}`);
       
     } catch (error) {
-      alert('Booking failed. Please try again.');
+      let errorMessage = 'Booking failed. Please try again.';
+      if (error.response?.data?.detail) {
+        errorMessage = `Booking failed: ${error.response.data.detail}`;
+      }
+      alert(errorMessage);
       console.error('Booking error:', error);
     } finally {
       setSubmitting(false);

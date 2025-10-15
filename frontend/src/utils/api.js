@@ -433,6 +433,50 @@ export const toggleFavorite = async (itemId) => {
   }
 };
 
+// Get user favorites
+export const getUserFavorites = async (userId) => {
+  try {
+    const response = await api.get(`/user/${userId}/favorites`);
+    return response.data;
+  } catch (error) {
+    console.error('Error getting user favorites:', error);
+    throw error;
+  }
+};
+
+// Create booking
+export const createBooking = async (bookingData) => {
+  try {
+    const response = await api.post('/bookings', bookingData);
+    return response.data;
+  } catch (error) {
+    console.error('Error creating booking:', error);
+    throw error;
+  }
+};
+
+// Get user bookings
+export const getUserBookings = async () => {
+  try {
+    const response = await api.get('/bookings');
+    return response.data;
+  } catch (error) {
+    console.error('Error getting user bookings:', error);
+    throw error;
+  }
+};
+
+// Cancel booking
+export const cancelBooking = async (bookingId) => {
+  try {
+    const response = await api.post(`/bookings/${bookingId}/cancel`);
+    return response.data;
+  } catch (error) {
+    console.error('Error canceling booking:', error);
+    throw error;
+  }
+};
+
 // Get similar items
 export const getSimilarItems = async (itemId) => {
   try {

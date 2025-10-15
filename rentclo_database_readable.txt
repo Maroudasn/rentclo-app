@@ -1,0 +1,121 @@
+================================================================================
+                          RENTCLO DATABASE EXPORT
+================================================================================
+Generated on: October 13, 2025 22:00:57
+Database Size: 36.0 KB
+Last Modified: September 22, 2025 18:21:46
+
+================================================================================
+                              TABLE STRUCTURES
+================================================================================
+
+1. USERS TABLE
+   ├── id (INTEGER, PRIMARY KEY, AUTO INCREMENT)
+   ├── username (TEXT, UNIQUE, NOT NULL)
+   ├── email (TEXT, UNIQUE, NOT NULL) 
+   ├── password_hash (TEXT, NOT NULL)
+   ├── user_type (TEXT, DEFAULT 'renter')
+   ├── first_name (TEXT)
+   ├── last_name (TEXT)
+   ├── phone (TEXT, UNIQUE)
+   ├── is_verified (BOOLEAN, DEFAULT 0)
+   ├── is_active (BOOLEAN, DEFAULT 1)
+   ├── created_at (TIMESTAMP, DEFAULT CURRENT_TIMESTAMP)
+   └── updated_at (TIMESTAMP, DEFAULT CURRENT_TIMESTAMP)
+
+2. LOGIN_SESSIONS TABLE
+   ├── id (INTEGER, PRIMARY KEY, AUTO INCREMENT)
+   ├── user_id (INTEGER, NOT NULL) → FOREIGN KEY to users(id)
+   ├── session_token (TEXT, UNIQUE, NOT NULL)
+   ├── expires_at (TIMESTAMP, NOT NULL)
+   └── created_at (TIMESTAMP, DEFAULT CURRENT_TIMESTAMP)
+
+3. USER_ADDRESSES TABLE
+   ├── id (INTEGER, PRIMARY KEY, AUTO INCREMENT)
+   ├── user_id (INTEGER, NOT NULL) → FOREIGN KEY to users(id)
+   ├── address_line1 (TEXT, NOT NULL)
+   ├── address_line2 (TEXT)
+   ├── city (TEXT, NOT NULL)
+   ├── state (TEXT, NOT NULL)
+   ├── zip_code (TEXT, NOT NULL)
+   ├── country (TEXT, DEFAULT 'USA')
+   ├── is_primary (BOOLEAN, DEFAULT 0)
+   └── created_at (TIMESTAMP, DEFAULT CURRENT_TIMESTAMP)
+
+================================================================================
+                              DATABASE CONTENT
+================================================================================
+
+USERS TABLE (3 records)
+================================================================================
+
+User #1 - testuser
+   ID: 1
+   Username: testuser
+   Email: test@example.com
+   Name: Test User
+   Phone: +1234567890
+   Type: renter
+   Status: Active & Verified
+   Created: 2025-09-22 15:21:46
+
+User #2 - admin  
+   ID: 2
+   Username: admin
+   Email: admin@rentclo.com
+   Name: Admin User
+   Phone: +1987654321
+   Type: admin
+   Status: Active & Verified
+   Created: 2025-09-22 15:21:46
+
+User #3 - owner1
+   ID: 3
+   Username: owner1
+   Email: owner@example.com
+   Name: Owner Smith
+   Phone: +1555666777
+   Type: owner
+   Status: Active & Verified
+   Created: 2025-09-22 15:21:46
+
+LOGIN_SESSIONS TABLE (0 records)
+================================================================================
+No active login sessions
+
+USER_ADDRESSES TABLE (3 records)
+================================================================================
+
+Address #1 (User: testuser)
+   Address: Test Street 123
+            Sample City, CA 90210
+            USA
+   Primary Address: Yes
+   Created: 2025-09-22 15:21:46
+
+Address #2 (User: admin)
+   Address: Admin Street 123
+            Sample City, CA 90210
+            USA
+   Primary Address: Yes
+   Created: 2025-09-22 15:21:46
+
+Address #3 (User: owner1)
+   Address: Owner Street 123
+            Sample City, CA 90210
+            USA
+   Primary Address: Yes
+   Created: 2025-09-22 15:21:46
+
+================================================================================
+                                 SUMMARY
+================================================================================
+
+Total Tables: 3
+Total Users: 3 (all active and verified)
+Total Addresses: 3 (each user has one primary address)
+Active Sessions: 0
+
+Database is ready for RentClo application operations.
+
+================================================================================

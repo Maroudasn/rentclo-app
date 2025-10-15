@@ -26,18 +26,26 @@ const ClothingDetail = () => {
 
   const fetchItemDetail = async () => {
     try {
+      console.log('🔍 Fetching item detail for ID:', itemId);
+      console.log('🔍 User context:', user);
       setLoading(true);
       const itemData = await getItemDetail(itemId);
+      console.log('✅ Item data received:', itemData);
+      console.log('✅ Item user_id:', itemData.user_id, 'Type:', typeof itemData.user_id);
+      console.log('✅ Current user id:', user?.id, 'Type:', typeof user?.id);
+      console.log('✅ String comparison:', String(user?.id), '!==', String(itemData.user_id), '=', String(user?.id) !== String(itemData.user_id));
       
       // Get relevant images using our smart image helper
       const itemImages = getItemImages(itemData);
-      setItem({
+      const processedItem = {
         ...itemData,
         images: itemImages
-      });
+      };
+      console.log('✅ Processed item:', processedItem);
+      setItem(processedItem);
     } catch (err) {
-      setError('Failed to load item details');
-      console.error('Error fetching item:', err);
+      console.error('❌ Error fetching item:', err);
+      setError('Failed to load item details: ' + (err.message || err));
     } finally {
       setLoading(false);
     }
@@ -133,6 +141,8 @@ const ClothingDetail = () => {
       <div className="clothing-detail-loading">
         <div className="loading-spinner"></div>
         <p>Loading item details...</p>
+        <p>Item ID: {itemId}</p>
+        <p>User: {user ? 'Logged in' : 'Not logged in'}</p>
       </div>
     );
   }
@@ -142,6 +152,14 @@ const ClothingDetail = () => {
       <div className="clothing-detail-error">
         <h2>Item Not Found</h2>
         <p>{error || "The item you're looking for doesn't exist or is no longer available."}</p>
+        <div style={{backgroundColor: '#ffeb3b', padding: '10px', margin: '10px 0', border: '2px solid red'}}>
+          <strong>DEBUG INFO:</strong><br/>
+          Item ID: {itemId}<br/>
+          Error: {error || 'No error message'}<br/>
+          Item exists: {item ? 'YES' : 'NO'}<br/>
+          User: {user ? JSON.stringify(user, null, 2) : 'Not logged in'}<br/>
+          Current URL: {window.location.href}
+        </div>
         <Link to="/home" className="back-to-home-btn">
           ← Back to Home
         </Link>
@@ -201,20 +219,87 @@ const ClothingDetail = () => {
             <div className="item-price">€{item.price_per_day} <span className="price-period">/ day</span></div>
           </div>
 
-          {/* Quick Actions */}
-          <div className="quick-actions">
-            {/* Show Book Now button only if user is not the owner */}
-            {user && user.id !== item.user_id && (
+          {/* BOOK NOW BUTTON AND FAVORITE BUTTON - Between title and item details */}
+          <div style={{
+            textAlign: 'center',
+            margin: '20px 0',
+            display: 'flex',
+            gap: '15px',
+            justifyContent: 'center',
+            alignItems: 'center'
+          }}>
+            <button 
+              onClick={handleBookNow}
+              style={{
+                backgroundColor: '#FF6B35',
+                color: 'white',
+                padding: '15px 40px',
+                fontSize: '18px',
+                fontWeight: 'bold',
+                border: 'none',
+                borderRadius: '10px',
+                cursor: 'pointer',
+                boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseOver={(e) => {
+                e.target.style.backgroundColor = '#FF5722';
+                e.target.style.transform = 'translateY(-2px)';
+              }}
+              onMouseOut={(e) => {
+                e.target.style.backgroundColor = '#FF6B35';
+                e.target.style.transform = 'translateY(0)';
+              }}
+            >
+              📅 BOOK NOW
+            </button>
+            
+            {/* Favorite button for all authenticated users except owner */}
+            {user && String(user.id) !== String(item.user_id) && (
               <button 
-                onClick={handleBookNow}
-                className="book-now-btn"
+                onClick={handleFavoriteToggle}
+                disabled={favoriteLoading}
+                style={{
+                  backgroundColor: item.is_favorited ? '#E91E63' : '#FFF',
+                  color: item.is_favorited ? 'white' : '#E91E63',
+                  padding: '15px 25px',
+                  fontSize: '18px',
+                  fontWeight: 'bold',
+                  border: item.is_favorited ? 'none' : '2px solid #E91E63',
+                  borderRadius: '10px',
+                  cursor: favoriteLoading ? 'not-allowed' : 'pointer',
+                  boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
+                  transition: 'all 0.3s ease',
+                  opacity: favoriteLoading ? 0.7 : 1
+                }}
+                onMouseOver={(e) => {
+                  if (!favoriteLoading) {
+                    e.target.style.backgroundColor = item.is_favorited ? '#C2185B' : '#E91E63';
+                    e.target.style.color = 'white';
+                    e.target.style.transform = 'translateY(-2px)';
+                  }
+                }}
+                onMouseOut={(e) => {
+                  if (!favoriteLoading) {
+                    e.target.style.backgroundColor = item.is_favorited ? '#E91E63' : '#FFF';
+                    e.target.style.color = item.is_favorited ? 'white' : '#E91E63';
+                    e.target.style.transform = 'translateY(0)';
+                  }
+                }}
               >
-                📅 Book Now
+                {favoriteLoading ? '⏳' : (item.is_favorited ? '❤️ SAVED' : '🤍 SAVE')}
               </button>
             )}
-            
+          </div>
+
+          {/* Quick Actions */}
+          <div className="quick-actions" style={{
+            padding: '20px',
+            textAlign: 'center',
+            marginTop: '20px'
+          }}>
             {/* Show Edit and Delete buttons only if user is the owner */}
-            {user && user.id === item.user_id && (
+            {user && String(user.id) === String(item.user_id) && (
               <>
                 <button 
                   onClick={handleEditClick}
@@ -231,17 +316,6 @@ const ClothingDetail = () => {
                   {deleteLoading ? '⏳ Deleting...' : '🗑️ Delete Item'}
                 </button>
               </>
-            )}
-            
-            {/* Favorite button for all authenticated users except owner */}
-            {user && user.id !== item.user_id && (
-              <button 
-                onClick={handleFavoriteToggle}
-                disabled={favoriteLoading}
-                className={`favorite-btn ${item.is_favorited ? 'favorited' : ''}`}
-              >
-                {favoriteLoading ? '❤️' : (item.is_favorited ? '❤️ Saved' : '🤍 Save')}
-              </button>
             )}
           </div>
 

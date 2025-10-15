@@ -35,6 +35,90 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 # Initialize database (verifies schema/file presence)
 database.init_database()
 
+# Utility functions for user stats
+def update_user_stats(user_id, stat_type, value=1, conn=None):
+    """Update user statistics in database"""
+    should_close = False
+    if conn is None:
+        conn = database.get_db_connection()
+        should_close = True
+    
+    try:
+        cursor = conn.cursor()
+        
+        if stat_type == "items_listed":
+            cursor.execute("""
+                UPDATE user_stats 
+                SET items_listed = items_listed + ?, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+            """, (value, user_id))
+        elif stat_type == "total_bookings":
+            cursor.execute("""
+                UPDATE user_stats 
+                SET total_bookings = total_bookings + ?, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+            """, (value, user_id))
+        elif stat_type == "total_spent":
+            cursor.execute("""
+                UPDATE user_stats 
+                SET total_spent = total_spent + ?, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+            """, (value, user_id))
+        elif stat_type == "total_earned":
+            cursor.execute("""
+                UPDATE user_stats 
+                SET total_earned = total_earned + ?, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+            """, (value, user_id))
+        
+        if should_close:
+            conn.commit()
+    finally:
+        if should_close and conn:
+            conn.close()
+
+def refresh_user_stats(user_id):
+    """Recalculate all user statistics from scratch"""
+    conn = database.get_db_connection()
+    try:
+        cursor = conn.cursor()
+        
+        # Count items
+        cursor.execute("SELECT COUNT(*) FROM items WHERE user_id = ?", (user_id,))
+        items_count = cursor.fetchone()[0]
+        
+        # Count bookings
+        cursor.execute("SELECT COUNT(*) FROM bookings WHERE user_id = ?", (user_id,))
+        bookings_count = cursor.fetchone()[0]
+        
+        # Calculate total spent
+        cursor.execute("""
+            SELECT COALESCE(SUM(total_amount), 0) 
+            FROM bookings 
+            WHERE user_id = ? AND status = 'completed'
+        """, (user_id,))
+        total_spent = cursor.fetchone()[0]
+        
+        # Calculate total earned (as item owner)
+        cursor.execute("""
+            SELECT COALESCE(SUM(total_amount), 0) 
+            FROM bookings 
+            WHERE owner_id = ? AND status = 'completed'
+        """, (user_id,))
+        total_earned = cursor.fetchone()[0]
+        
+        # Update stats
+        cursor.execute("""
+            UPDATE user_stats 
+            SET items_listed = ?, total_bookings = ?, total_spent = ?, 
+                total_earned = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ?
+        """, (items_count, bookings_count, total_spent, total_earned, user_id))
+        
+        conn.commit()
+    finally:
+        conn.close()
+
 # Pydantic models
 class LoginRequest(BaseModel):
     username: str
@@ -142,6 +226,28 @@ class ProfileUpdate(BaseModel):
 class PasswordChange(BaseModel):
     current_password: str
     new_password: str
+
+# Booking models
+class BookingRequest(BaseModel):
+    item_id: int
+    start_date: str  # YYYY-MM-DD format
+    end_date: str    # YYYY-MM-DD format
+    notes: Optional[str] = None
+
+class BookingResponse(BaseModel):
+    id: int
+    item_id: int
+    item_title: str
+    owner_name: str
+    start_date: str
+    end_date: str
+    total_days: int
+    price_per_day: float
+    total_amount: float
+    status: str
+    payment_status: str
+    created_at: str
+    notes: Optional[str]
 
 # Search request model
 class SearchRequest(BaseModel):
@@ -708,19 +814,42 @@ async def update_user_profile(profile_data: ProfileUpdate, current_user: dict = 
         # Update address if provided
         if profile_data.address:
             address = profile_data.address
-            cursor.execute("""
-                INSERT OR REPLACE INTO user_addresses 
-                (user_id, address_line1, address_line2, city, state, zip_code, country, is_primary)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-            """, (
-                current_user['id'],
-                address.get('address_line1', ''),
-                address.get('address_line2', ''),
-                address.get('city', ''),
-                address.get('state', ''),
-                address.get('zip_code', ''),
-                address.get('country', 'USA')
-            ))
+            
+            # Check if user already has an address
+            cursor.execute("SELECT id FROM user_addresses WHERE user_id = ? AND is_primary = 1", (current_user['id'],))
+            existing_address = cursor.fetchone()
+            
+            if existing_address:
+                # Update existing address
+                cursor.execute("""
+                    UPDATE user_addresses 
+                    SET address_line1 = ?, address_line2 = ?, city = ?, state = ?, 
+                        zip_code = ?, country = ?
+                    WHERE user_id = ? AND is_primary = 1
+                """, (
+                    address.get('address_line1', ''),
+                    address.get('address_line2', ''),
+                    address.get('city', ''),
+                    address.get('state', ''),
+                    address.get('zip_code', ''),
+                    address.get('country', 'USA'),
+                    current_user['id']
+                ))
+            else:
+                # Insert new address
+                cursor.execute("""
+                    INSERT INTO user_addresses 
+                    (user_id, address_line1, address_line2, city, state, zip_code, country, is_primary)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                """, (
+                    current_user['id'],
+                    address.get('address_line1', ''),
+                    address.get('address_line2', ''),
+                    address.get('city', ''),
+                    address.get('state', ''),
+                    address.get('zip_code', ''),
+                    address.get('country', 'USA')
+                ))
         
         conn.commit()
         
@@ -780,28 +909,339 @@ async def change_password(password_data: PasswordChange, current_user: dict = De
 # Get user stats endpoint
 @app.get("/user-stats")
 async def get_user_stats(current_user: dict = Depends(get_current_user)):
-    """Get user statistics"""
+    """Get user statistics from database"""
+    conn = None
     try:
         conn = database.get_db_connection()
         cursor = conn.cursor()
         
-        # Get user creation date
+        # Get user creation date for member since
         cursor.execute("SELECT created_at FROM users WHERE id = ?", (current_user['id'],))
         user_data = cursor.fetchone()
         
-        # Mock stats - replace with actual queries when you have bookings/items tables
+        # Get user stats from user_stats table
+        cursor.execute("""
+            SELECT total_bookings, items_listed, total_spent, total_earned, 
+                   avg_rating, total_reviews
+            FROM user_stats 
+            WHERE user_id = ?
+        """, (current_user['id'],))
+        
+        stats_data = cursor.fetchone()
+        
+        if stats_data:
+            total_bookings = stats_data[0]
+            items_listed = stats_data[1]
+            total_spent = float(stats_data[2]) if stats_data[2] else 0.0
+            total_earned = float(stats_data[3]) if stats_data[3] else 0.0
+            avg_rating = float(stats_data[4]) if stats_data[4] else 0.0
+            total_reviews = stats_data[5]
+        else:
+            # Initialize stats if not found (shouldn't happen after migration)
+            cursor.execute("SELECT COUNT(*) FROM items WHERE user_id = ?", (current_user['id'],))
+            items_count = cursor.fetchone()[0]
+            
+            cursor.execute("""
+                INSERT INTO user_stats (user_id, total_bookings, items_listed)
+                VALUES (?, 0, ?)
+            """, (current_user['id'], items_count))
+            conn.commit()
+            
+            total_bookings = 0
+            items_listed = items_count
+            total_spent = 0.0
+            total_earned = 0.0
+            avg_rating = 0.0
+            total_reviews = 0
+        
+        # Extract year from created_at for member since
+        created_at = user_data['created_at']
+        if created_at:
+            member_since_year = created_at.split('-')[0] if isinstance(created_at, str) else str(created_at.year)
+        else:
+            member_since_year = "2025"
+        
         stats = {
-            "totalBookings": 3,  # This would be: SELECT COUNT(*) FROM bookings WHERE user_id = ?
-            "itemsListed": 2 if current_user['user_type'] != 'tenant' else 0,  # SELECT COUNT(*) FROM items WHERE user_id = ?
-            "memberSince": user_data['created_at']
+            "totalBookings": total_bookings,
+            "itemsListed": items_listed,
+            "memberSince": member_since_year,
+            "totalSpent": total_spent,
+            "totalEarned": total_earned,
+            "avgRating": avg_rating,
+            "totalReviews": total_reviews
         }
         
-        conn.close()
         return stats
         
     except Exception as e:
         print(f"Error getting user stats: {e}")
         raise HTTPException(status_code=500, detail="Failed to get user stats")
+    finally:
+        if conn:
+            conn.close()
+
+# Booking endpoints
+@app.post("/bookings", response_model=BookingResponse)
+async def create_booking(booking_data: BookingRequest, current_user: dict = Depends(get_current_user)):
+    """Create a new booking"""
+    conn = None
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get item details
+        cursor.execute("""
+            SELECT id, user_id, title, price_per_day, is_available 
+            FROM items WHERE id = ?
+        """, (booking_data.item_id,))
+        item = cursor.fetchone()
+        
+        if not item:
+            raise HTTPException(status_code=404, detail="Item not found")
+        
+        if not item[4]:  # is_available
+            raise HTTPException(status_code=400, detail="Item is not available")
+        
+        if item[1] == current_user['id']:
+            raise HTTPException(status_code=400, detail="Cannot book your own item")
+        
+        # Calculate booking details
+        from datetime import datetime
+        start_date = datetime.strptime(booking_data.start_date, '%Y-%m-%d')
+        end_date = datetime.strptime(booking_data.end_date, '%Y-%m-%d')
+        total_days = (end_date - start_date).days + 1
+        
+        if total_days <= 0:
+            raise HTTPException(status_code=400, detail="Invalid date range")
+        
+        price_per_day = float(item[3])
+        total_amount = price_per_day * total_days
+        
+        # Create booking
+        cursor.execute("""
+            INSERT INTO bookings (
+                user_id, item_id, owner_id, booking_date, start_date, end_date,
+                total_days, price_per_day, total_amount, status, payment_status, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'pending', ?)
+        """, (
+            current_user['id'], booking_data.item_id, item[1],
+            datetime.now().strftime('%Y-%m-%d'),
+            booking_data.start_date, booking_data.end_date,
+            total_days, price_per_day, total_amount, booking_data.notes
+        ))
+        
+        booking_id = cursor.lastrowid
+        
+        # Update user stats for the renter
+        update_user_stats(current_user['id'], "total_bookings", 1, conn)
+        
+        conn.commit()
+        
+        # Get owner name for response
+        cursor.execute("SELECT first_name, last_name FROM users WHERE id = ?", (item[1],))
+        owner = cursor.fetchone()
+        owner_name = f"{owner[0]} {owner[1]}" if owner else "Unknown"
+        
+        return BookingResponse(
+            id=booking_id,
+            item_id=booking_data.item_id,
+            item_title=item[2],
+            owner_name=owner_name,
+            start_date=booking_data.start_date,
+            end_date=booking_data.end_date,
+            total_days=total_days,
+            price_per_day=price_per_day,
+            total_amount=total_amount,
+            status="pending",
+            payment_status="pending",
+            created_at=datetime.now().isoformat(),
+            notes=booking_data.notes
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        print(f"Error creating booking: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create booking")
+    finally:
+        if conn:
+            conn.close()
+
+@app.get("/bookings")
+async def get_user_bookings(current_user: dict = Depends(get_current_user)):
+    """Get all bookings for the current user with automatic status updates"""
+    conn = None
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        
+        # First, update statuses based on dates
+        from datetime import datetime, date
+        today = date.today().isoformat()
+        
+        # Update completed bookings (end_date has passed and status is pending)
+        cursor.execute("""
+            UPDATE bookings 
+            SET status = 'completed', payment_status = 'paid', updated_at = CURRENT_TIMESTAMP
+            WHERE end_date < ? AND status = 'pending' AND user_id = ?
+        """, (today, current_user['id']))
+        
+        conn.commit()
+        
+        # Get bookings where user is the renter
+        cursor.execute("""
+            SELECT b.id, b.item_id, i.title, u.first_name, u.last_name,
+                   b.start_date, b.end_date, b.total_days, b.price_per_day,
+                   b.total_amount, b.status, b.payment_status, b.created_at, b.notes
+            FROM bookings b
+            JOIN items i ON b.item_id = i.id
+            JOIN users u ON b.owner_id = u.id
+            WHERE b.user_id = ?
+            ORDER BY b.created_at DESC
+        """, (current_user['id'],))
+        
+        bookings = cursor.fetchall()
+        
+        return [
+            BookingResponse(
+                id=booking[0],
+                item_id=booking[1],
+                item_title=booking[2],
+                owner_name=f"{booking[3]} {booking[4]}",
+                start_date=booking[5],
+                end_date=booking[6],
+                total_days=booking[7],
+                price_per_day=float(booking[8]),
+                total_amount=float(booking[9]),
+                status=booking[10],
+                payment_status=booking[11],
+                created_at=booking[12],
+                notes=booking[13]
+            )
+            for booking in bookings
+        ]
+        
+    except Exception as e:
+        print(f"Error getting bookings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get bookings")
+    finally:
+        if conn:
+            conn.close()
+
+@app.post("/bookings/{booking_id}/complete")
+async def complete_booking(booking_id: int, current_user: dict = Depends(get_current_user)):
+    """Mark a booking as completed (for item owners)"""
+    conn = None
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get booking details
+        cursor.execute("""
+            SELECT user_id, owner_id, total_amount, status 
+            FROM bookings WHERE id = ?
+        """, (booking_id,))
+        booking = cursor.fetchone()
+        
+        if not booking:
+            raise HTTPException(status_code=404, detail="Booking not found")
+        
+        if booking[1] != current_user['id']:  # owner_id
+            raise HTTPException(status_code=403, detail="Not authorized to complete this booking")
+        
+        if booking[3] == 'completed':
+            raise HTTPException(status_code=400, detail="Booking already completed")
+        
+        # Update booking status
+        cursor.execute("""
+            UPDATE bookings 
+            SET status = 'completed', payment_status = 'paid', updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (booking_id,))
+        
+        # Update user stats
+        renter_id = booking[0]
+        owner_id = booking[1]
+        amount = float(booking[2])
+        
+        # Add to renter's total spent
+        update_user_stats(renter_id, "total_spent", amount, conn)
+        # Add to owner's total earned
+        update_user_stats(owner_id, "total_earned", amount, conn)
+        
+        conn.commit()
+        
+        return {"message": "Booking completed successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        print(f"Error completing booking: {e}")
+        raise HTTPException(status_code=500, detail="Failed to complete booking")
+    finally:
+        if conn:
+            conn.close()
+
+@app.post("/bookings/{booking_id}/cancel")
+async def cancel_booking(booking_id: int, current_user: dict = Depends(get_current_user)):
+    """Cancel a future booking (only allowed for future bookings)"""
+    conn = None
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get booking details and verify ownership
+        cursor.execute("""
+            SELECT user_id, status, start_date, end_date 
+            FROM bookings 
+            WHERE id = ?
+        """, (booking_id,))
+        
+        booking = cursor.fetchone()
+        if not booking:
+            raise HTTPException(status_code=404, detail="Booking not found")
+        
+        user_id, status, start_date, end_date = booking
+        
+        # Verify user owns this booking
+        if user_id != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to cancel this booking")
+        
+        # Check if booking is already cancelled or completed
+        if status in ['cancelled', 'completed']:
+            raise HTTPException(status_code=400, detail=f"Cannot cancel a {status} booking")
+        
+        # Check if booking is for future dates
+        from datetime import date
+        today = date.today().isoformat()
+        if start_date <= today:
+            raise HTTPException(status_code=400, detail="Cannot cancel a booking that has already started")
+        
+        # Cancel the booking
+        cursor.execute("""
+            UPDATE bookings 
+            SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (booking_id,))
+        
+        conn.commit()
+        
+        return {"message": "Booking cancelled successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        print(f"Error cancelling booking: {e}")
+        raise HTTPException(status_code=500, detail="Failed to cancel booking")
+    finally:
+        if conn:
+            conn.close()
 
 @app.post("/search")
 async def search_items(search_data: SearchRequest):
@@ -1184,6 +1624,56 @@ async def get_sizes_by_category(category: str):
         print(f"Error getting sizes: {e}")
         raise HTTPException(status_code=500, detail="Failed to get sizes")
 
+# Get user's own items - Must be before /items/{item_id} route
+@app.get("/items/my-items")
+async def get_my_items(current_user: dict = Depends(get_current_user)):
+    """Get all items belonging to the current user"""
+    print(f"🔐 User authenticated: {current_user}")
+    
+    conn = None
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT 
+                i.id,
+                i.title,
+                i.description,
+                i.price_per_day,
+                c.name as category,
+                i.gender,
+                i.occasion,
+                i.size,
+                i.condition,
+                i.brand,
+                i.color,
+                i.location_area,
+                i.is_available,
+                i.created_at,
+                ii.image_url,
+                ia.start_date,
+                ia.end_date
+            FROM items i
+            LEFT JOIN categories c ON i.category_id = c.id
+            LEFT JOIN item_images ii ON i.id = ii.item_id AND ii.is_primary = 1
+            LEFT JOIN item_availability ia ON i.id = ia.item_id
+            WHERE i.user_id = ?
+            ORDER BY i.created_at DESC
+        ''', (current_user['id'],))
+        
+        items = cursor.fetchall()
+        print(f"📦 Found {len(items)} items for user {current_user['id']}")
+        
+        return {"items": [dict(item) for item in items]}
+        
+    except Exception as e:
+        print(f"❌ Error getting user items: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve your items")
+    finally:
+        if conn:
+            conn.close()
+
 @app.get("/items/{item_id}")
 async def get_item_detail(item_id: int, current_user: Optional[dict] = Depends(get_current_user_optional)):
     """Get detailed information about a specific item"""
@@ -1346,6 +1836,198 @@ async def toggle_favorite(item_id: int, current_user: dict = Depends(get_current
             conn.rollback()
         print(f"Error toggling favorite: {e}")
         raise HTTPException(status_code=500, detail="Failed to update favorites")
+    finally:
+        if conn:
+            conn.close()
+
+# Get user's favorites
+@app.get("/user/{user_id}/favorites")
+async def get_user_favorites(user_id: int, current_user: dict = Depends(get_current_user)):
+    """Get all favorited items for a user"""
+    # Users can only see their own favorites
+    if current_user['id'] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    conn = None
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT 
+                i.id,
+                i.title as name,
+                i.description,
+                i.price_per_day,
+                c.name as category,
+                i.location_area as location,
+                i.is_available as available,
+                ii.image_url,
+                u.first_name || ' ' || u.last_name as owner_name,
+                f.created_at
+            FROM favorites f
+            JOIN items i ON f.item_id = i.id
+            LEFT JOIN categories c ON i.category_id = c.id
+            LEFT JOIN item_images ii ON i.id = ii.item_id AND ii.is_primary = 1
+            LEFT JOIN users u ON i.user_id = u.id
+            WHERE f.user_id = ?
+            ORDER BY f.created_at DESC
+        ''', (user_id,))
+        
+        favorites = cursor.fetchall()
+        return {"favorites": [dict(fav) for fav in favorites]}
+        
+    except Exception as e:
+        print(f"❌ Error getting user favorites: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve favorites")
+    finally:
+        if conn:
+            conn.close()
+
+# Remove from favorites
+@app.delete("/user/{user_id}/favorites/{item_id}")
+async def remove_favorite(user_id: int, item_id: int, current_user: dict = Depends(get_current_user)):
+    """Remove item from user's favorites"""
+    # Users can only manage their own favorites
+    if current_user['id'] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    conn = None
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            DELETE FROM favorites 
+            WHERE user_id = ? AND item_id = ?
+        ''', (user_id, item_id))
+        
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Favorite not found")
+        
+        conn.commit()
+        return {"message": "Item removed from favorites"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        print(f"❌ Error removing favorite: {e}")
+        raise HTTPException(status_code=500, detail="Failed to remove favorite")
+    finally:
+        if conn:
+            conn.close()
+
+# Add simple POST /items endpoint for AddNewItem component
+@app.post("/items")
+async def create_item(
+    name: str = Form(...),
+    description: str = Form(...),
+    category: str = Form(...),
+    price_per_day: float = Form(...),
+    location: str = Form(...),
+    image_url: str = Form(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Create a new item listing"""
+    conn = None
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get category ID
+        cursor.execute('SELECT id FROM categories WHERE name = ?', (category,))
+        category_row = cursor.fetchone()
+        if not category_row:
+            raise HTTPException(status_code=400, detail="Invalid category")
+        
+        category_id = category_row[0]
+        
+        # Insert item
+        cursor.execute('''
+            INSERT INTO items (
+                title, description, category_id, price_per_day, 
+                location_area, user_id, is_available, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+        ''', (
+            name, description, category_id, price_per_day,
+            location, current_user['id'], datetime.now().isoformat()
+        ))
+        
+        item_id = cursor.lastrowid
+        
+        # Add image if provided
+        if image_url:
+            cursor.execute('''
+                INSERT INTO item_images (item_id, image_url, is_primary, created_at)
+                VALUES (?, ?, 1, ?)
+            ''', (item_id, image_url, datetime.now().isoformat()))
+        
+        # Update user stats
+        update_user_stats(current_user['id'], "items_listed", 1, conn)
+        
+        conn.commit()
+        
+        return {
+            "message": "Item created successfully",
+            "item_id": item_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        print(f"❌ Error creating item: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create item")
+    finally:
+        if conn:
+            conn.close()
+
+# Toggle item availability
+@app.put("/items/{item_id}/availability")
+async def toggle_item_availability(
+    item_id: int, 
+    is_available: bool = Form(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Toggle item availability status"""
+    conn = None
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check if user owns the item
+        cursor.execute('SELECT user_id FROM items WHERE id = ?', (item_id,))
+        item = cursor.fetchone()
+        if not item:
+            raise HTTPException(status_code=404, detail="Item not found")
+        
+        if item[0] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Update availability
+        cursor.execute('''
+            UPDATE items 
+            SET is_available = ?
+            WHERE id = ?
+        ''', (is_available, item_id))
+        
+        conn.commit()
+        
+        return {
+            "message": f"Item {'enabled' if is_available else 'disabled'}",
+            "is_available": is_available
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        print(f"❌ Error updating availability: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update availability")
     finally:
         if conn:
             conn.close()
@@ -1610,56 +2292,6 @@ async def delete_item(
         if conn:
             conn.rollback()
         raise HTTPException(status_code=500, detail="Failed to delete item")
-    finally:
-        if conn:
-            conn.close()
-
-# Get user's own items
-@app.get("/items/my-items")
-async def get_my_items(current_user: dict = Depends(get_current_user)):
-    """Get all items belonging to the current user"""
-    print(f"🔐 User authenticated: {current_user}")
-    
-    conn = None
-    try:
-        conn = database.get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT 
-                i.id,
-                i.title,
-                i.description,
-                i.price_per_day,
-                c.name as category,
-                i.gender,
-                i.occasion,
-                i.size,
-                i.condition,
-                i.brand,
-                i.color,
-                i.location_area,
-                i.is_available,
-                i.created_at,
-                ii.image_url,
-                ia.start_date,
-                ia.end_date
-            FROM items i
-            LEFT JOIN categories c ON i.category_id = c.id
-            LEFT JOIN item_images ii ON i.id = ii.item_id AND ii.is_primary = 1
-            LEFT JOIN item_availability ia ON i.id = ia.item_id
-            WHERE i.user_id = ?
-            ORDER BY i.created_at DESC
-        ''', (current_user['id'],))
-        
-        items = cursor.fetchall()
-        print(f"📦 Found {len(items)} items for user {current_user['id']}")
-        
-        return {"items": [dict(item) for item in items]}
-        
-    except Exception as e:
-        print(f"❌ Error getting user items: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve your items")
     finally:
         if conn:
             conn.close()

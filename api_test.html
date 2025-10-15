@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-result { margin: 10px 0; padding: 10px; border-radius: 5px; }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .testing { background-color: #fff3cd; color: #856404; }
+        button { margin: 5px; padding: 10px 15px; cursor: pointer; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 5px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>RentClo API Test</h1>
+    <p>Backend Server: <strong>http://localhost:8001</strong></p>
+    
+    <button onclick="testHealth()">Test Health</button>
+    <button onclick="testCategories()">Test Categories</button>
+    <button onclick="testFilters()">Test Filters</button>
+    <button onclick="testSizes()">Test Sizes</button>
+    <button onclick="testSearch()">Test Search</button>
+    <button onclick="clearResults()">Clear Results</button>
+    
+    <div id="results"></div>
+
+    <script>
+        const API_BASE = 'http://localhost:8001';
+        
+        function addResult(message, type = 'testing', data = null) {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = `test-result ${type}`;
+            div.innerHTML = `<strong>${new Date().toLocaleTimeString()}</strong>: ${message}`;
+            if (data) {
+                div.innerHTML += `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            }
+            results.appendChild(div);
+            results.scrollTop = results.scrollHeight;
+        }
+        
+        async function apiCall(endpoint, options = {}) {
+            try {
+                addResult(`Testing ${endpoint}...`, 'testing');
+                const response = await fetch(`${API_BASE}${endpoint}`, {
+                    ...options,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                addResult(`✅ ${endpoint} - Success`, 'success', data);
+                return data;
+            } catch (error) {
+                addResult(`❌ ${endpoint} - Error: ${error.message}`, 'error');
+                console.error('API Error:', error);
+            }
+        }
+        
+        function testHealth() {
+            apiCall('/health');
+        }
+        
+        function testCategories() {
+            apiCall('/items/categories');
+        }
+        
+        function testFilters() {
+            apiCall('/search/filters');
+        }
+        
+        function testSizes() {
+            apiCall('/items/sizes/Dresses');
+        }
+        
+        function testSearch() {
+            apiCall('/search', {
+                method: 'POST',
+                body: JSON.stringify({
+                    query: 'dress',
+                    category: 'Dresses',
+                    limit: 5
+                })
+            });
+        }
+        
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+        
+        // Auto-test on load
+        window.onload = function() {
+            addResult('🚀 Starting API tests...', 'testing');
+            setTimeout(testHealth, 500);
+            setTimeout(testCategories, 1000);
+            setTimeout(testFilters, 1500);
+        };
+    </script>
+</body>
+</html>

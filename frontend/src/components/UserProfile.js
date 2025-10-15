@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from './protected/AuthContext';
-import { apiGet, apiPut, changePassword } from '../utils/api';
+import { getUserProfile, updateUserProfile, changePassword, getUserStats, getUserFavorites } from '../utils/api';
 import './UserProfile.css';
+import MyBookings from './MyBookings';
+import MyListings from './MyListings';
+import Favorites from './Favorites';
+import AddNewItem from './AddNewItem';
 
 const UserProfile = () => {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const [activeSection, setActiveSection] = useState('profile');
   const [profileData, setProfileData] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -15,6 +19,8 @@ const UserProfile = () => {
   const [editForm, setEditForm] = useState({
     email: '',
     phone: '',
+    first_name: '',
+    last_name: '',
     address: {
       address_line1: '',
       address_line2: '',
@@ -39,40 +45,31 @@ const UserProfile = () => {
     memberSince: ''
   });
 
+  const [favoritesCount, setFavoritesCount] = useState(0);
+
   useEffect(() => {
     fetchUserProfile();
     fetchUserStats();
+    fetchFavoritesCount();
   }, []);
 
   const fetchUserProfile = async () => {
     try {
       setLoading(true);
-      // Mock API call - replace with actual endpoint
-      const mockProfile = {
-        id: user?.id,
-        username: user?.username,
-        email: user?.email || 'user@example.com',
-        phone: user?.phone || '+1234567890',
-        address: {
-          address_line1: '123 Main Street',
-          address_line2: 'Apt 4B',
-          city: 'New York',
-          state: 'NY',
-          zip_code: '10001',
-          country: 'USA'
-        },
-        profile_picture: null
-      };
-
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 500));
-      setProfileData(mockProfile);
+      // Use dedicated API function for getting profile data
+      const response = await getUserProfile();
+      console.log('Profile data received:', response);
+      
+      setProfileData(response);
       setEditForm({
-        email: mockProfile.email,
-        phone: mockProfile.phone,
-        address: { ...mockProfile.address }
+        email: response.email,
+        phone: response.phone,
+        first_name: response.first_name,
+        last_name: response.last_name,
+        address: { ...response.address }
       });
     } catch (error) {
+      console.error('Error fetching profile:', error);
       setMessage('Failed to load profile data');
     } finally {
       setLoading(false);
@@ -81,15 +78,30 @@ const UserProfile = () => {
 
   const fetchUserStats = async () => {
     try {
-      // Mock user statistics
-      const mockStats = {
-        totalBookings: 3,
-        itemsListed: user?.user_type !== 'tenant' ? 2 : 0,
-        memberSince: '2024-01-15'
-      };
-      setUserStats(mockStats);
+      // Use dedicated API function to get user statistics from database
+      const response = await getUserStats();
+      setUserStats(response);
     } catch (error) {
       console.error('Error fetching user stats:', error);
+      // Fallback to default stats if API fails
+      setUserStats({
+        totalBookings: 0,
+        itemsListed: 0,
+        memberSince: new Date().toISOString()
+      });
+    }
+  };
+
+  const fetchFavoritesCount = async () => {
+    if (!user?.id) return;
+    
+    try {
+      // Use dedicated API function to get favorites from database
+      const response = await getUserFavorites(user.id);
+      setFavoritesCount(response.favorites?.length || 0);
+    } catch (error) {
+      console.error('Error fetching favorites count:', error);
+      setFavoritesCount(0);
     }
   };
 
@@ -99,6 +111,8 @@ const UserProfile = () => {
       setEditForm({
         email: profileData.email,
         phone: profileData.phone,
+        first_name: profileData.first_name,
+        last_name: profileData.last_name,
         address: { ...profileData.address }
       });
     }
@@ -111,22 +125,27 @@ const UserProfile = () => {
     setMessage('');
 
     try {
-      // Mock API call - replace with actual endpoint
+      // Use dedicated API function to update profile
       console.log('Updating profile with:', editForm);
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const response = await updateUserProfile(editForm);
+      console.log('Profile update response:', response);
       
-      // Update local state
-      setProfileData(prev => ({
-        ...prev,
-        email: editForm.email,
-        phone: editForm.phone,
-        address: { ...editForm.address }
-      }));
+      // Refresh profile data from server
+      await fetchUserProfile();
       
-      setMessage('Profile updated successfully!');
+      setMessage('✅ Profile updated successfully!');
       setIsEditing(false);
     } catch (error) {
-      setMessage('Failed to update profile');
+      console.error('Profile update error:', error);
+      let errorMessage = 'Failed to update profile';
+      
+      if (error.response?.status === 400) {
+        errorMessage = error.response.data.detail || 'Invalid data provided';
+      } else if (error.response?.data?.detail) {
+        errorMessage = error.response.data.detail;
+      }
+      
+      setMessage(`❌ ${errorMessage}`);
     } finally {
       setLoading(false);
     }
@@ -240,19 +259,13 @@ const UserProfile = () => {
             >
               🔒 Change Password
             </button>
-            <button 
-              className={`sidebar-btn ${activeSection === 'activity' ? 'active' : ''}`}
-              onClick={() => setActiveSection('activity')}
-            >
-              📊 Activity Overview
-            </button>
           </div>
 
           <div className="user-quick-info">
             <h4>Quick Stats</h4>
             <p>Bookings: {userStats.totalBookings}</p>
             <p>Listings: {userStats.itemsListed}</p>
-            <p>Member since: {new Date(userStats.memberSince).toLocaleDateString()}</p>
+            <p>Member since: {userStats.memberSince}</p>
           </div>
         </div>
 
@@ -261,6 +274,73 @@ const UserProfile = () => {
           {message && (
             <div className={`message ${message.includes('success') ? 'success' : 'error'}`}>
               {message}
+            </div>
+          )}
+
+          {/* Quick Actions Section - Now at the top */}
+          {activeSection === 'profile' && (
+            <div className="modern-quick-actions">
+              <div className="quick-actions-header">
+                <h2>🚀 Quick Actions</h2>
+                <p>Manage your rentals and activity</p>
+              </div>
+              
+              <div className="modern-actions-grid">
+                <button 
+                  className="modern-action-card"
+                  onClick={() => setActiveSection('bookings')}
+                >
+                  <div className="action-icon">📋</div>
+                  <div className="action-content">
+                    <h3>My Bookings</h3>
+                    <p>View your rental history</p>
+                    <span className="action-count">{userStats.totalBookings}</span>
+                  </div>
+                  <div className="action-arrow">→</div>
+                </button>
+
+                {user?.user_type !== 'tenant' && (
+                  <button 
+                    className="modern-action-card"
+                    onClick={() => setActiveSection('listings')}
+                  >
+                    <div className="action-icon">🛍️</div>
+                    <div className="action-content">
+                      <h3>My Listings</h3>
+                      <p>Manage your items</p>
+                      <span className="action-count">{userStats.itemsListed}</span>
+                    </div>
+                    <div className="action-arrow">→</div>
+                  </button>
+                )}
+
+                <button 
+                  className="modern-action-card"
+                  onClick={() => setActiveSection('favorites')}
+                >
+                  <div className="action-icon">❤️</div>
+                  <div className="action-content">
+                    <h3>Favorites</h3>
+                    <p>Your saved items</p>
+                    <span className="action-count">{favoritesCount}</span>
+                  </div>
+                  <div className="action-arrow">→</div>
+                </button>
+
+                {user?.user_type !== 'tenant' && (
+                  <button 
+                    className="modern-action-card add-item-card"
+                    onClick={() => window.location.href = '/add-item'}
+                  >
+                    <div className="action-icon">➕</div>
+                    <div className="action-content">
+                      <h3>Add New Item</h3>
+                      <p>List something to rent</p>
+                    </div>
+                    <div className="action-arrow">→</div>
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -289,15 +369,16 @@ const UserProfile = () => {
                         </div>
                       )}
                     </div>
-                    <button className="upload-btn" disabled>
-                      📷 Upload Photo
-                    </button>
                   </div>
 
                   <div className="profile-details">
                     <div className="detail-row">
                       <label>Username:</label>
                       <span>{profileData?.username}</span>
+                    </div>
+                    <div className="detail-row">
+                      <label>Full Name:</label>
+                      <span>{profileData?.first_name} {profileData?.last_name}</span>
                     </div>
                     <div className="detail-row">
                       <label>Email:</label>
@@ -335,6 +416,29 @@ const UserProfile = () => {
                         className="disabled-input"
                       />
                       <small>Username cannot be changed</small>
+                    </div>
+
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label>First Name *</label>
+                        <input
+                          type="text"
+                          name="first_name"
+                          value={editForm.first_name}
+                          onChange={handleInputChange}
+                          required
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Last Name *</label>
+                        <input
+                          type="text"
+                          name="last_name"
+                          value={editForm.last_name}
+                          onChange={handleInputChange}
+                          required
+                        />
+                      </div>
                     </div>
 
                     <div className="form-group">
@@ -491,64 +595,30 @@ const UserProfile = () => {
               </form>
             </div>
           )}
-
-          {/* Activity Overview Section */}
-          {activeSection === 'activity' && (
-            <div className="content-section">
-              <div className="section-header">
-                <h2>Activity Overview</h2>
-              </div>
-
-              <div className="activity-stats">
-                <div className="stat-card">
-                  <div className="stat-icon">📅</div>
-                  <div className="stat-info">
-                    <h3>{userStats.totalBookings}</h3>
-                    <p>Total Bookings</p>
-                  </div>
-                </div>
-
-                <div className="stat-card">
-                  <div className="stat-icon">👕</div>
-                  <div className="stat-info">
-                    <h3>{userStats.itemsListed}</h3>
-                    <p>Items Listed</p>
-                  </div>
-                </div>
-
-                <div className="stat-card">
-                  <div className="stat-icon">⭐</div>
-                  <div className="stat-info">
-                    <h3>{new Date(userStats.memberSince).getFullYear()}</h3>
-                    <p>Member Since</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="quick-links">
-                <h3>Quick Actions</h3>
-                <div className="links-grid">
-                  <button className="quick-link-btn" disabled>
-                    📋 My Bookings
-                  </button>
-                  {user?.user_type !== 'tenant' && (
-                    <button className="quick-link-btn" disabled>
-                      🛍️ My Listings
-                    </button>
-                  )}
-                  {user?.user_type !== 'tenant' && (
-                    <button className="quick-link-btn" disabled>
-                      ➕ Add New Item
-                    </button>
-                  )}
-                  <button className="quick-link-btn" disabled>
-                    ❤️ Favorites
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
+
+        {/* Render active section content */}
+        {activeSection !== 'profile' && (
+          <div className="section-header">
+            <button 
+              className="back-to-profile-btn"
+              onClick={() => setActiveSection('profile')}
+            >
+              ← Back to Profile
+            </button>
+            <h2 className="section-title">
+              {activeSection === 'bookings' && '📋 My Bookings'}
+              {activeSection === 'listings' && '🛍️ My Listings'}
+              {activeSection === 'favorites' && '❤️ Favorites'}
+              {activeSection === 'add-item' && '➕ Add New Item'}
+            </h2>
+          </div>
+        )}
+        
+        {activeSection === 'bookings' && <MyBookings />}
+        {activeSection === 'listings' && <MyListings />}
+        {activeSection === 'favorites' && <Favorites />}
+        {activeSection === 'add-item' && <AddNewItem />}
       </div>
     </div>
   );
