@@ -45,16 +45,7 @@ const Favorites = () => {
     }
   };
 
-  const addToCart = async (itemId) => {
-    try {
-      await apiPost('/cart/add', { item_id: itemId, quantity: 1 });
-      // Show success message or update UI
-      alert('Item added to cart!');
-    } catch (error) {
-      console.error('Error adding to cart:', error);
-      setError('Failed to add item to cart');
-    }
-  };
+  // Cart functionality removed as requested by user
 
   const formatPrice = (price) => {
     return new Intl.NumberFormat('en-US', {
@@ -224,16 +215,24 @@ const Favorites = () => {
                           View Details
                         </button>
                         <button 
-                          className="action-btn cart-btn"
-                          onClick={() => addToCart(item.id)}
+                          className="action-btn remove-favorite-btn"
+                          onClick={() => removeFavorite(item.id)}
                         >
-                          Add to Cart
+                          Remove from Favorites
                         </button>
                       </>
                     ) : (
-                      <button className="action-btn unavailable-btn" disabled>
-                        Unavailable
-                      </button>
+                      <>
+                        <button className="action-btn unavailable-btn" disabled>
+                          Unavailable
+                        </button>
+                        <button 
+                          className="action-btn remove-favorite-btn"
+                          onClick={() => removeFavorite(item.id)}
+                        >
+                          Remove from Favorites
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>

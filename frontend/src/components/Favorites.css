@@ -306,13 +306,13 @@
   background-color: #0056b3;
 }
 
-.cart-btn {
-  background-color: #28a745;
+.remove-favorite-btn {
+  background-color: #dc3545;
   color: white;
 }
 
-.cart-btn:hover {
-  background-color: #218838;
+.remove-favorite-btn:hover {
+  background-color: #c82333;
 }
 
 .unavailable-btn {

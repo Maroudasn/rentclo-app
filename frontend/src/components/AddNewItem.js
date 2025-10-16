@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from './protected/AuthContext';
-import { apiPost } from '../utils/api';
+import { apiPost, apiGet } from '../utils/api';
 import './AddNewItem.css';
 
 const AddNewItem = () => {
@@ -16,22 +16,36 @@ const AddNewItem = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [categories, setCategories] = useState([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
 
-  const categories = [
-    'Electronics',
-    'Furniture',
-    'Appliances',
-    'Sports & Recreation',
-    'Tools & Equipment',
-    'Vehicles',
-    'Books & Media',
-    'Clothing & Fashion',
-    'Home & Garden',
-    'Photography',
-    'Musical Instruments',
-    'Games & Toys',
-    'Other'
-  ];
+  // Fetch categories from database on component mount
+  useEffect(() => {
+    fetchCategories();
+  }, []);
+
+  const fetchCategories = async () => {
+    try {
+      setCategoriesLoading(true);
+      const response = await apiGet('/items/categories');
+      setCategories(response);
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+      // Fallback to default categories if API fails
+      setCategories([
+        { id: 1, name: 'Dresses' },
+        { id: 2, name: 'Tops' },
+        { id: 3, name: 'Bottoms' },
+        { id: 4, name: 'Outerwear' },
+        { id: 5, name: 'Accessories' },
+        { id: 6, name: 'Shoes' },
+        { id: 7, name: 'Formal Wear' },
+        { id: 8, name: 'Casual Wear' }
+      ]);
+    } finally {
+      setCategoriesLoading(false);
+    }
+  };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -76,13 +90,30 @@ const AddNewItem = () => {
       setLoading(true);
       setError('');
       
-      const itemData = {
-        ...formData,
-        price_per_day: parseFloat(formData.price_per_day),
-        owner_id: user.user_id
-      };
+      // Create FormData to match backend expectations
+      const formDataToSend = new FormData();
+      formDataToSend.append('name', formData.name.trim());
+      formDataToSend.append('description', formData.description.trim());
+      formDataToSend.append('category', formData.category);
+      formDataToSend.append('price_per_day', parseFloat(formData.price_per_day));
+      formDataToSend.append('location', formData.location.trim());
+      if (formData.image_url.trim()) {
+        formDataToSend.append('image_url', formData.image_url.trim());
+      }
 
-      await apiPost('/items', itemData);
+      // Use direct fetch instead of apiPost for FormData
+      const response = await fetch('http://localhost:8001/items', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('session_token')}`
+        },
+        body: formDataToSend
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to add item');
+      }
       
       setSuccess(true);
       setFormData({
@@ -193,11 +224,14 @@ const AddNewItem = () => {
                 value={formData.category}
                 onChange={handleInputChange}
                 required
+                disabled={categoriesLoading}
               >
-                <option value="">Select a category</option>
+                <option value="">
+                  {categoriesLoading ? 'Loading categories...' : 'Select a category'}
+                </option>
                 {categories.map(category => (
-                  <option key={category} value={category}>
-                    {category}
+                  <option key={category.id || category.name} value={category.name}>
+                    {category.name}
                   </option>
                 ))}
               </select>
