@@ -41,8 +41,7 @@ rentclo-app/
 
 ##  Οδηγίες Εκτέλεσης
 
-
-## 1. Backend Setup
+ 1. Backend Setup
 ```bash
 cd backend
 python -m venv venv
@@ -70,6 +69,7 @@ Frontend runs on: http://localhost:3000
 Πτυχιακή εργασία, Τμήμα Πληροφορικής / Αριστοτέλειο Πανεπιστήμιο Θεσσαλονίκης
 
 Επιβλέποντες: Σταμέλος Ιωάννης,Απόστολος Κρητικός
+
 
 
 
