@@ -41,7 +41,7 @@ rentclo-app/
 
 ##  Οδηγίες Εκτέλεσης
 
- 1. Backend Setup
+## 1. Backend Setup
 ```bash
 cd backend
 python -m venv venv
@@ -62,13 +62,14 @@ npm install
 npm start
 Frontend runs on: http://localhost:3000
 
-##  **Δημιουργός**
+ **Δημιουργός**
 
 Νικόλαος-Γεώργιος Μαρούδας
 
 Πτυχιακή εργασία, Τμήμα Πληροφορικής / Αριστοτέλειο Πανεπιστήμιο Θεσσαλονίκης
 
 Επιβλέποντες: Σταμέλος Ιωάννης,Απόστολος Κρητικός
+
 
 
 
