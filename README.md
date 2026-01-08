@@ -41,20 +41,27 @@ rentclo-app/
 
 ##  Οδηγίες Εκτέλεσης
 
-### Backend
+
+#### 1. Backend Setup
 ```bash
 cd backend
 python -m venv venv
-source venv/bin/activate  # (Windows: venv\Scripts\activate)
+venv\Scripts\activate          # Windows
+# source venv/bin/activate     # Linux/Mac
 pip install -r requirements.txt
-uvicorn main:app --reload
+
+2. Start Backend Server
+python -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+
+Backend runs on: http://localhost:8001
+
+3. Frontend Setup (New Terminal)
 cd frontend
 npm install
+
+4. Start Frontend
 npm start
-cd database
-python init_db.py
-```
----
+Frontend runs on: http://localhost:3000
 
 ##  **Δημιουργός**
 
@@ -63,6 +70,7 @@ python init_db.py
 Πτυχιακή εργασία, Τμήμα Πληροφορικής / Αριστοτέλειο Πανεπιστήμιο Θεσσαλονίκης
 
 Επιβλέποντες: Σταμέλος Ιωάννης,Απόστολος Κρητικός
+
 
 
 
